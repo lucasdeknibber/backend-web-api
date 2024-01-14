@@ -1,16 +1,27 @@
 const express = require('express');
 const bodyParser = require('body-parser');
+const low = require('lowdb');
+const FileSync = require('lowdb/adapters/FileSync');
+const _ = require('lodash');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-let entities = []; // In-memory database for entities
-let hobbies = []; // In-memory database for hobbies
+let entities = [];
+
+// Create JSON file adapter for entities
+const entityAdapter = new FileSync('entityDatabase.json');
+const entityDb = low(entityAdapter);
+
+// Create 'entities' collection in the database if it doesn't exist
+entityDb.defaults({ entities: [] }).write();
 
 // Create Entity
 app.post('/entity', (req, res) => {
   const { name, otherField } = req.body;
+
   if (!name || !otherField) {
     return res.status(400).json({ error: 'Fields cannot be empty' });
   }
@@ -24,7 +35,8 @@ app.post('/entity', (req, res) => {
   }
 
   const newEntity = { id: Date.now(), name, otherField };
-  entities.push(newEntity);
+  entityDb.get('entities').push(newEntity).write();
+
   res.json(newEntity);
 });
 
@@ -32,25 +44,35 @@ app.post('/entity', (req, res) => {
 app.get('/entity', (req, res) => {
   const limit = parseInt(req.query.limit) || 10;
   const offset = parseInt(req.query.offset) || 0;
-  const paginatedEntities = entities.slice(offset, offset + limit);
+  const paginatedEntities = entityDb.get('entities').slice(offset, offset + limit).value();
   res.json(paginatedEntities);
 });
 
 // Read Entity by ID
 app.get('/entity/:id', (req, res) => {
   const id = parseInt(req.params.id);
-  const entity = entities.find(ent => ent.id === id);
+  const entity = entityDb.get('entities').find({ id }).value();
   if (entity) {
     res.json(entity);
   } else {
     res.status(404).json({ error: 'Entity not found' });
   }
 });
+// Search Entities by name
+app.get('/search', (req, res) => {
+  const searchTerm = req.query.q;
+  if (!searchTerm) {
+    return res.status(400).json({ error: 'Search term is required' });
+  }
+  const searchResults = entityDb.get('entities').filter(ent => ent.name.includes(searchTerm)).value();
+  res.json(searchResults);
+});
 
 // Update Entity
 app.put('/entity/:id', (req, res) => {
   const id = parseInt(req.params.id);
   const { name, otherField } = req.body;
+
   if (!name || !otherField) {
     return res.status(400).json({ error: 'Fields cannot be empty' });
   }
@@ -63,48 +85,40 @@ app.put('/entity/:id', (req, res) => {
     return res.status(400).json({ error: 'First name cannot contain numbers' });
   }
 
-  const index = entities.findIndex(ent => ent.id === id);
-  if (index !== -1) {
-    const updatedEntity = { ...entities[index], name, otherField };
-    entities[index] = updatedEntity;
-    res.json(updatedEntity);
-  } else {
-    res.status(404).json({ error: 'Entity not found' });
-  }
+  const updatedEntity = entityDb.get('entities').find({ id }).assign({ name, otherField }).write();
+  res.json(updatedEntity);
 });
 
 // Delete Entity
 app.delete('/entity/:id', (req, res) => {
   const id = parseInt(req.params.id);
-  const index = entities.findIndex(ent => ent.id === id);
-  if (index !== -1) {
-    entities.splice(index, 1);
-    res.json({ message: 'Entity deleted successfully' });
-  } else {
-    res.status(404).json({ error: 'Entity not found' });
-  }
+  entityDb.get('entities').remove({ id }).write();
+  res.json({ message: 'Entity deleted successfully' });
 });
 
-// Search Entities by name
-app.get('/search', (req, res) => {
-  const searchTerm = req.query.q;
-  if (!searchTerm) {
-    return res.status(400).json({ error: 'Search term is required' });
-  }
-
-  const searchResults = entities.filter(ent => ent.name.includes(searchTerm));
-  res.json(searchResults);
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
+// ... (previous code remains unchanged)
+
+// Create JSON file adapter for hobbies
+const hobbyAdapter = new FileSync('hobbyDatabase.json');
+const hobbyDb = low(hobbyAdapter);
+
+// Create 'hobbies' collection in the database if it doesn't exist
+hobbyDb.defaults({ hobbies: [] }).write();
 
 // Create Hobby
 app.post('/hobby', (req, res) => {
   const { name } = req.body;
+
   if (!name) {
     return res.status(400).json({ error: 'Hobby name cannot be empty' });
   }
 
   const newHobby = { id: Date.now(), name };
-  hobbies.push(newHobby);
+  hobbyDb.get('hobbies').push(newHobby).write();
+
   res.json(newHobby);
 });
 
@@ -112,14 +126,14 @@ app.post('/hobby', (req, res) => {
 app.get('/hobby', (req, res) => {
   const limit = parseInt(req.query.limit) || 10;
   const offset = parseInt(req.query.offset) || 0;
-  const paginatedHobbies = hobbies.slice(offset, offset + limit);
+  const paginatedHobbies = hobbyDb.get('hobbies').slice(offset, offset + limit).value();
   res.json(paginatedHobbies);
 });
 
 // Read Hobby by ID
 app.get('/hobby/:id', (req, res) => {
   const id = parseInt(req.params.id);
-  const hobby = hobbies.find(h => h.id === id);
+  const hobby = hobbyDb.get('hobbies').find({ id }).value();
   if (hobby) {
     res.json(hobby);
   } else {
@@ -131,32 +145,20 @@ app.get('/hobby/:id', (req, res) => {
 app.put('/hobby/:id', (req, res) => {
   const id = parseInt(req.params.id);
   const { name } = req.body;
+
   if (!name) {
     return res.status(400).json({ error: 'Hobby name cannot be empty' });
   }
 
-  const index = hobbies.findIndex(h => h.id === id);
-  if (index !== -1) {
-    const updatedHobby = { ...hobbies[index], name };
-    hobbies[index] = updatedHobby;
-    res.json(updatedHobby);
-  } else {
-    res.status(404).json({ error: 'Hobby not found' });
-  }
+  const updatedHobby = hobbyDb.get('hobbies').find({ id }).assign({ name }).write();
+  res.json(updatedHobby);
 });
 
 // Delete Hobby
 app.delete('/hobby/:id', (req, res) => {
   const id = parseInt(req.params.id);
-  const index = hobbies.findIndex(h => h.id === id);
-  if (index !== -1) {
-    hobbies.splice(index, 1);
-    res.json({ message: 'Hobby deleted successfully' });
-  } else {
-    res.status(404).json({ error: 'Hobby not found' });
-  }
+  hobbyDb.get('hobbies').remove({ id }).write();
+  res.json({ message: 'Hobby deleted successfully' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+// ... (rest of the code remains unchanged)
